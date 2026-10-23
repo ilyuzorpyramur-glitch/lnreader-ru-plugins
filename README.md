@@ -10,7 +10,7 @@
 В LNReader: **Настройки → Репозитории → Добавить**, вставить:
 
 ```
-https://raw.githubusercontent.com/Sindrow33/lnreader-ru-plugins/plugins/v3.0.0/.dist/plugins.min.json
+https://raw.githubusercontent.com/ilyuzorpyramur-glitch/lnreader-ru-plugins/plugins/v3.0.0/.dist/plugins.min.json
 ```
 
 Затем **Обзор** — источники появятся там.
