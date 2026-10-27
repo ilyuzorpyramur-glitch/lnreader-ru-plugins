@@ -5,14 +5,13 @@ import { fetchApi } from "@libs/fetch";
 import { NovelStatus } from "@libs/novelStatus";
 import { load } from "cheerio";
 
-type LitnetBook = {
-  id?: string;
-  title?: string;
-  image?: string;
-  description?: string;
-  rating?: { ratingValue?: number };
+type LdBook = {
+  name?: string;
   author?: { name?: string };
+  description?: string;
+  image?: string;
   genre?: string | string[];
+  aggregateRating?: { ratingValue?: number };
 };
 
 class Litnet implements Plugin.PluginBase {
@@ -20,14 +19,19 @@ class Litnet implements Plugin.PluginBase {
   name = "Литнет";
   icon = "src/ru/litnet/icon.png";
   site = "https://litnet.com";
-  version = "1.0.0";
+  version = "1.1.0";
 
-  private userAgent =
-    "Mozilla/5.0 (Linux; Android 13; Mobile; rv:138.0) Gecko/138.0 Firefox/138.0";
-
-  private get headers() {
-    return { "User-Agent": this.userAgent };
-  }
+  /**
+   * Litnet serves two frontends: the Angular "super app" (no chapter list in
+   * the SSR HTML) and the classic mobile markup used by the Litnet app.
+   * The app user agent always gets the classic markup, which contains both
+   * the full chapter list and the reader text.
+   */
+  private headers = {
+    "User-Agent": "Litnet/3.5.1 (Android 13; Xiaomi)",
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Accept-Language": "ru-RU,ru;q=0.9,en;q=0.8",
+  };
 
   filters = {
     genre: {
@@ -51,41 +55,63 @@ class Litnet implements Plugin.PluginBase {
     },
   } satisfies Filters;
 
+  private async fetchHtml(url: string): Promise<string> {
+    const res = await fetchApi(url, { headers: this.headers });
+    return res.text();
+  }
+
   private parseBookList(html: string): Plugin.NovelItem[] {
     const $ = load(html);
     const novels: Plugin.NovelItem[] = [];
     const seen = new Set<string>();
 
-    $('a[href*="/ru/book/"]').each((_, element) => {
-      const link = $(element);
-      const img = link.find("img").first();
-      const href = link.attr("href");
-      const alt = img.attr("alt") || "";
+    const push = (href?: string, name?: string, cover?: string) => {
+      if (!href) return;
+      const path = href.match(/\/ru\/book\/([^/?#]+)/)?.[1];
+      const cleanName = name?.trim();
+      if (!path || !cleanName || seen.has(path)) return;
+      seen.add(path);
+      novels.push({ name: cleanName, path, cover: cover || defaultCover });
+    };
 
-      if (!href || !img.length || !/\/ru\/book\/[^/?#]+$/.test(href)) {
-        return;
-      }
+    // Classic markup: <a class="bookCard-img" href="/ru/book/slug">
+    // <img alt="Обложка книги Название">
+    $('img[alt^="Обложка книги"]').each((_, img) => {
+      const image = $(img);
+      const link = image.closest('a[href*="/ru/book/"]');
+      const alt = image.attr("alt")?.replace(/^Обложка книги\s+/, "");
+      push(link.attr("href"), alt, image.attr("src") || image.attr("data-src"));
+    });
 
-      const match = href.match(/\/ru\/book\/([^/?#]+)/);
-      if (!match || seen.has(match[1])) {
-        return;
-      }
-      seen.add(match[1]);
-
-      const name =
-        alt.match(/«(.+?)»/)?.[1]?.trim() || link.attr("title")?.trim() || "";
-      if (!name) {
-        return;
-      }
-
-      novels.push({
+    // Angular markup fallback: alt="Книга «Название» - Автор читать онлайн."
+    $('a[href*="/ru/book/"] img').each((_, img) => {
+      const image = $(img);
+      const alt = image.attr("alt") || "";
+      const name = alt.match(/«(.+?)»/)?.[1];
+      push(
+        image.closest('a[href*="/ru/book/"]').attr("href"),
         name,
-        path: match[1],
-        cover: img.attr("src") || defaultCover,
-      });
+        image.attr("src") || image.attr("data-src"),
+      );
     });
 
     return novels;
+  }
+
+  private parseLdBook($: ReturnType<typeof load>): LdBook {
+    const scripts = $('script[type="application/ld+json"]');
+    for (const element of scripts.toArray()) {
+      try {
+        const data = JSON.parse($(element).text());
+        const list = Array.isArray(data) ? data : [data];
+        for (const item of list) {
+          if (item?.["@type"] === "Book") return item as LdBook;
+        }
+      } catch {
+        continue;
+      }
+    }
+    return {};
   }
 
   async popularNovels(
@@ -93,63 +119,71 @@ class Litnet implements Plugin.PluginBase {
     { filters }: Plugin.PopularNovelsOptions<typeof this.filters>,
   ): Promise<Plugin.NovelItem[]> {
     const genre = filters?.genre?.value || "all";
-    const url = `${this.site}/ru/top/${genre}?page=${pageNo}`;
-    const html = await fetchApi(url, { headers: this.headers }).then((res) =>
-      res.text(),
+    const html = await this.fetchHtml(
+      `${this.site}/ru/top/${genre}?page=${pageNo}`,
     );
     return this.parseBookList(html);
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const html = await fetchApi(`${this.site}/ru/book/${novelPath}`, {
-      headers: this.headers,
-    }).then((res) => res.text());
-
+    const html = await this.fetchHtml(`${this.site}/ru/book/${novelPath}`);
     const $ = load(html);
-    let book: LitnetBook = {};
-    const ldJson = $('script[type="application/ld+json"]').text();
-    if (ldJson) {
-      try {
-        book = JSON.parse(ldJson) as LitnetBook;
-      } catch {
-        book = {};
-      }
-    }
+    const book = this.parseLdBook($);
+
+    const infoText = $(".bp-bookInfo").text().replace(/\s+/g, " ");
 
     const novel: Plugin.SourceNovel = {
       path: novelPath,
-      name: book.title || $("h1").first().text().trim(),
-      author: book.author?.name,
-      cover: book.image || $('meta[property="og:image"]').attr("content"),
-      summary: (book.description || "")
+      name: $("h1.book-title").first().text().trim() || book.name || "",
+      author:
+        $(".bp-bookTag-heading a.author").first().text().trim() ||
+        book.author?.name ||
+        undefined,
+      cover:
+        $(".book-cover img").first().attr("src") ||
+        book.image ||
+        $('meta[property="og:image"]').attr("content"),
+      summary: (book.description || $(".book_annotation").text() || "")
         .replace(/<br\s*\/?>/gi, "\n")
         .replace(/<[^>]+>/g, "")
         .trim(),
-      genres: Array.isArray(book.genre) ? book.genre.join(", ") : book.genre,
-      status:
-        html.includes("В процессе") || html.includes("Продолжается")
-          ? NovelStatus.Ongoing
-          : NovelStatus.Completed,
+      status: /В процессе/.test(infoText)
+        ? NovelStatus.Ongoing
+        : /Завершен/.test(infoText)
+          ? NovelStatus.Completed
+          : undefined,
     };
 
-    if (book.rating?.ratingValue) {
-      novel.rating = Number(book.rating.ratingValue);
+    const genres = Array.isArray(book.genre)
+      ? book.genre
+      : book.genre
+        ? [book.genre]
+        : [];
+    if (genres.length) {
+      novel.genres = genres.join(", ");
+    }
+
+    if (book.aggregateRating?.ratingValue) {
+      novel.rating = Number(book.aggregateRating.ratingValue);
     }
 
     const chapters: Plugin.ChapterItem[] = [];
     $(".bp-chapterList a.collection-item").each((_, element) => {
       const link = $(element);
-      const chapterUrl = link.attr("href");
-      const chapterId = chapterUrl?.match(/[?&]c=(\d+)/)?.[1];
-      if (!chapterUrl || !chapterId) {
-        return;
-      }
+      const href = link.attr("href");
+      if (!href) return;
 
-      const name = link.clone().find("span").remove().end().text().trim();
-
+      const name = link
+        .clone()
+        .find("span")
+        .remove()
+        .end()
+        .text()
+        .replace(/\s+/g, " ")
+        .trim();
       chapters.push({
         name: name || `Глава ${chapters.length + 1}`,
-        path: `${novelPath}?c=${chapterId}`,
+        path: href.replace(/^https?:\/\/litnet\.com/, "").replace(/^\//, ""),
       });
     });
 
@@ -158,18 +192,18 @@ class Litnet implements Plugin.PluginBase {
   }
 
   async parseChapter(chapterPath: string): Promise<string> {
-    const html = await fetchApi(`${this.site}/ru/reader/${chapterPath}`, {
-      headers: this.headers,
-    }).then((res) => res.text());
+    const path = chapterPath.replace(/^\/+/, "");
+    const url = /^ru\/reader\//.test(path)
+      ? `${this.site}/${path}`
+      : `${this.site}/ru/reader/${path}`;
 
+    const html = await this.fetchHtml(url);
     const $ = load(html);
     const content = $(".jsReaderText");
-    content.find("script, style, .ad, .pagination-w").remove();
+    content.find("script, style, .ad, .ad-container").remove();
     content.find("img").each((_, image) => {
       const src = $(image).attr("src");
-      if (src && src.startsWith("//")) {
-        $(image).attr("src", `https:${src}`);
-      }
+      if (src?.startsWith("//")) $(image).attr("src", `https:${src}`);
     });
 
     return content.html() || "";
@@ -179,20 +213,20 @@ class Litnet implements Plugin.PluginBase {
     searchTerm: string,
     pageNo: number,
   ): Promise<Plugin.NovelItem[]> {
-    const url = `${this.site}/ru/search?q=${encodeURIComponent(
-      searchTerm,
-    )}&page=${pageNo}`;
-    const html = await fetchApi(url, { headers: this.headers }).then((res) =>
-      res.text(),
+    const html = await this.fetchHtml(
+      `${this.site}/ru/search?q=${encodeURIComponent(
+        searchTerm,
+      )}&page=${pageNo}`,
     );
     return this.parseBookList(html);
   }
 
   resolveUrl(path: string, isNovel?: boolean): string {
+    const clean = path.replace(/^\/?/, "");
     if (isNovel) {
-      return `${this.site}/ru/book/${path}`;
+      return `${this.site}/ru/book/${clean}`;
     }
-    return `${this.site}/ru/reader/${path}`;
+    return `${this.site}/ru/reader/${clean}`;
   }
 }
 
