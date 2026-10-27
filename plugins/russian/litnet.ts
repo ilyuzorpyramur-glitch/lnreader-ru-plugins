@@ -149,26 +149,9 @@ class Litnet implements Plugin.PluginBase {
         .trim(),
       status: /В процессе/.test(infoText)
         ? NovelStatus.Ongoing
-        : /Завершен/.test(infoText)
+        : /Полный текст|Завершен|Завершён/.test(infoText)
           ? NovelStatus.Completed
-          : undefined,
-    };
-
-    const genres = Array.isArray(book.genre)
-      ? book.genre
-      : book.genre
-        ? [book.genre]
-        : [];
-    if (genres.length) {
-      novel.genres = genres.join(", ");
-    }
-
-    if (book.aggregateRating?.ratingValue) {
-      novel.rating = Number(book.aggregateRating.ratingValue);
-    }
-
-    const chapters: Plugin.ChapterItem[] = [];
-    $(".bp-chapterList a.collection-item").each((_, element) => {
+          : undefined, element) => {
       const link = $(element);
       const href = link.attr("href");
       if (!href) return;
