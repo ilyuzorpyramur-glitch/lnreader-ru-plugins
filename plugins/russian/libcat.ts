@@ -7,22 +7,16 @@ import { load } from "cheerio";
 /** Site pages merged into one reader chapter (a site page is ~4-5k chars). */
 const PAGES_PER_CHAPTER = 5;
 
-type BookRef = {
-  /** Book path without page suffix, e.g. `knigi/.../292535-slug.html`. */
-  base: string;
-  id: string;
-  slug: string;
-  /** First and last site page included in a chapter. */
-  from: number;
-  to: number;
-};
+/** SEO boilerplate the site renders instead of a real annotation. */
+const BOILERPLATE =
+  /Здесь есть возможность читать онлайн|Ниже представлен текст книги|читать онлайн бесплатно полную книгу/i;
 
 class LibCat implements Plugin.PluginBase {
   id = "LibCat";
   name = "ЛибКат";
   icon = "src/ru/libcat/icon.png";
   site = "https://libcat.ru";
-  version = "1.0.0";
+  version = "1.0.1";
 
   private headers = {
     "User-Agent":
@@ -78,10 +72,15 @@ class LibCat implements Plugin.PluginBase {
     return `${this.site}/${prefix}${id}-${pageNo}-${slug}.html`;
   }
 
+  private absolute(src?: string): string {
+    if (!src) return "";
+    if (src.startsWith("http")) return src;
+    return `${this.site}${src.startsWith("/") ? "" : "/"}${src}`;
+  }
+
   private coverFromThumb(src?: string): string {
     if (!src || src.startsWith("data:")) return defaultCover;
-    const absolute = src.startsWith("http") ? src : this.site + src;
-    return absolute.replace(/-thumb(\.\w+)$/i, "$1");
+    return this.absolute(src).replace(/-thumb(\.\w+)$/i, "$1");
   }
 
   private parseBookList(html: string): Plugin.NovelItem[] {
@@ -111,13 +110,15 @@ class LibCat implements Plugin.PluginBase {
     return novels;
   }
 
+  /**
+   * The reader page keeps the text in `<p>` blocks inside `#read`, next to a
+   * pagination bar and an ad slot — both are dropped.
+   */
   private static extractText($: ReturnType<typeof load>): string {
-    const container = $("#text").length ? $("#text") : $("#read");
+    const container = $("#read").length ? $("#read") : $(".tg-description");
     const content = container.clone();
     content
-      .find(
-        'script, style, ins, iframe, div[id^="yandex"], .navigation, .ad, .adv',
-      )
+      .find("script, style, ins, iframe, noscript, .navigation, #text, .ad")
       .remove();
     content.find("img").each((_, image) => {
       const src = $(image).attr("src");
@@ -139,7 +140,7 @@ class LibCat implements Plugin.PluginBase {
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
-    const { base, id, slug } = this.splitBookPath(novelPath);
+    const { base } = this.splitBookPath(novelPath);
     const html = await this.fetchHtml(this.pageUrl(base, 1));
     const $ = load(html);
     const pageText = $.root().text().replace(/\s+/g, " ");
@@ -150,19 +151,29 @@ class LibCat implements Plugin.PluginBase {
       : ["", title];
 
     const ratingMatch = pageText.match(/Рейтинг книги:\s*([\d.,]+)\s*\/\s*5/);
-    const genreMatch = pageText.match(/Жанр:\s*([^/]+?)\s*\/\s*на русском/);
+
+    const breadcrumbs = $('[itemprop="itemListElement"] span[itemprop="name"]')
+      .toArray()
+      .map((node) => $(node).text().trim())
+      .filter(Boolean);
+    const genres = breadcrumbs.slice(1, -1).join(", ");
+
+    const coverHref = $('a[itemprop="image"]').first().attr("href");
+    const cover = coverHref
+      ? this.absolute(coverHref).replace(/-cover(\.\w+)$/i, "$1")
+      : this.coverFromThumb(
+          $(".tg-featureimg img").first().attr("data-src") ||
+            $(".tg-featureimg img").first().attr("src") ||
+            $('meta[property="og:image"]').attr("content"),
+        );
 
     const novel: Plugin.SourceNovel = {
       path: base,
       name: tail.trim() || title,
       author:
         head.trim() || $(".tg-bookwriter").first().text().trim() || undefined,
-      cover: this.coverFromThumb(
-        $(".tg-featureimg img").first().attr("data-src") ||
-          $(".tg-featureimg img").first().attr("src") ||
-          $('meta[property="og:image"]').attr("content"),
-      ),
-      genres: genreMatch?.[1].trim(),
+      cover,
+      genres: genres || undefined,
       chapters: [],
     };
 
@@ -173,7 +184,7 @@ class LibCat implements Plugin.PluginBase {
     const annotation = $(".tg-booktitle p.tg-description").first().clone();
     annotation.find("a, script, style").remove();
     const summary = annotation.text().replace(/\s+/g, " ").trim();
-    if (summary) novel.summary = summary;
+    if (summary && !BOILERPLATE.test(summary)) novel.summary = summary;
 
     const totalPages = Number(
       $("#read").attr("data-count") || $("input#pgn1").attr("max") || 1,
@@ -184,13 +195,12 @@ class LibCat implements Plugin.PluginBase {
     const chapters: Plugin.ChapterItem[] = [];
     for (let from = 1; from <= total; from += PAGES_PER_CHAPTER) {
       const to = Math.min(from + PAGES_PER_CHAPTER - 1, total);
-      const ref: BookRef = { base, id, slug, from, to };
       chapters.push({
         name:
           total <= PAGES_PER_CHAPTER
             ? "Полный текст"
             : `Часть ${chapters.length + 1} (стр. ${from}–${to})`,
-        path: `${ref.base}::${ref.from}-${ref.to}`,
+        path: `${base}::${from}-${to}`,
       });
     }
 
