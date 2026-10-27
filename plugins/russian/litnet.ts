@@ -18,7 +18,7 @@ class Litnet implements Plugin.PluginBase {
   name = "Литнет";
   icon = "src/ru/litnet/icon.png";
   site = "https://litnet.com";
-  version = "1.2.0";
+  version = "1.3.0";
 
   /**
    * Litnet serves two frontends: the Angular "super app" (no chapter list in
