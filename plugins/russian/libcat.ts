@@ -16,7 +16,7 @@ class LibCat implements Plugin.PluginBase {
   name = "ЛибКат";
   icon = "src/ru/libcat/icon.png";
   site = "https://libcat.ru";
-  version = "1.0.2";
+  version = "1.1.0";
 
   private headers = {
     "User-Agent":
@@ -127,16 +127,48 @@ class LibCat implements Plugin.PluginBase {
     return content.html()?.trim() || "";
   }
 
+  private bookId(path: string): number {
+    return Number(this.splitBookPath(path).id) || 0;
+  }
+
   async popularNovels(
     pageNo: number,
-    { filters }: Plugin.PopularNovelsOptions<typeof this.filters>,
+    {
+      showLatestNovels,
+      filters,
+    }: Plugin.PopularNovelsOptions<typeof this.filters>,
   ): Promise<Plugin.NovelItem[]> {
     const genre = filters?.genre?.value || "fantastika-i-fentezi";
-    const url =
-      pageNo > 1
-        ? `${this.site}/knigi/${genre}/page/${pageNo}/`
-        : `${this.site}/knigi/${genre}/`;
-    return this.parseBookList(await this.fetchHtml(url));
+
+    if (showLatestNovels) {
+      // The catalogue has no date sort, so fresh books are collected from the
+      // first pages and ordered by book id (ids grow as books are added).
+      const collected: Plugin.NovelItem[] = [];
+      const seen = new Set<string>();
+      for (let page = 1; page <= 3; page += 1) {
+        const items = this.parseBookList(
+          await this.fetchHtml(this.catalogUrl(genre, page)),
+        );
+        for (const item of items) {
+          if (seen.has(item.path)) continue;
+          seen.add(item.path);
+          collected.push(item);
+        }
+      }
+      collected.sort((a, b) => this.bookId(b.path) - this.bookId(a.path));
+      const start = (pageNo - 1) * 20;
+      return collected.slice(start, start + 20);
+    }
+
+    return this.parseBookList(
+      await this.fetchHtml(this.catalogUrl(genre, pageNo)),
+    );
+  }
+
+  private catalogUrl(genre: string, pageNo: number): string {
+    return pageNo > 1
+      ? `${this.site}/knigi/${genre}/page/${pageNo}/`
+      : `${this.site}/knigi/${genre}/`;
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {

@@ -18,7 +18,7 @@ class Litnet implements Plugin.PluginBase {
   name = "Литнет";
   icon = "src/ru/litnet/icon.png";
   site = "https://litnet.com";
-  version = "1.3.0";
+  version = "1.4.0";
 
   /**
    * Litnet serves two frontends: the Angular "super app" (no chapter list in
@@ -151,13 +151,18 @@ class Litnet implements Plugin.PluginBase {
 
   async popularNovels(
     pageNo: number,
-    { filters }: Plugin.PopularNovelsOptions<typeof this.filters>,
+    {
+      showLatestNovels,
+      filters,
+    }: Plugin.PopularNovelsOptions<typeof this.filters>,
   ): Promise<Plugin.NovelItem[]> {
-    const genre = filters?.genre?.value || "all";
-    const html = await this.fetchHtml(
-      `${this.site}/ru/top/${genre}?page=${pageNo}`,
+    // "Latest" is the site's own fresh-releases feed and ignores the genre.
+    const section = showLatestNovels
+      ? "latest-new"
+      : filters?.genre?.value || "all";
+    return this.parseBookList(
+      await this.fetchHtml(`${this.site}/ru/top/${section}?page=${pageNo}`),
     );
-    return this.parseBookList(html);
   }
 
   async parseNovel(novelPath: string): Promise<Plugin.SourceNovel> {
