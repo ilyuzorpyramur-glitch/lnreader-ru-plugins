@@ -30,6 +30,7 @@ ICONS = {
     "src/ru/bookriver/icon.png": ("BR", (90, 200, 220), (14, 30, 34)),
     "src/ru/ficbook/icon.png": ("FB", (255, 150, 90), (36, 24, 16)),
     "src/ru/jaomix/icon.png": ("JX", (200, 160, 255), (26, 20, 38)),
+    "src/ru/litnet/icon.png": ("LN", (245, 105, 155), (38, 18, 28)),
     "src/ru/neobook/icon.png": ("NB", (130, 220, 160), (16, 32, 24)),
     "src/ru/noveltl/icon.png": ("TL", (255, 180, 100), (36, 26, 16)),
     "src/ru/ranobehub/icon.png": ("RH", (110, 170, 255), (18, 24, 42)),
