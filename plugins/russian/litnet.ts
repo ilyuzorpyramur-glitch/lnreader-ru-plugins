@@ -11,7 +11,6 @@ type LdBook = {
   description?: string;
   image?: string;
   genre?: string | string[];
-  aggregateRating?: { ratingValue?: number };
 };
 
 class Litnet implements Plugin.PluginBase {
@@ -58,6 +57,36 @@ class Litnet implements Plugin.PluginBase {
   private async fetchHtml(url: string): Promise<string> {
     const res = await fetchApi(url, { headers: this.headers });
     return res.text();
+  }
+
+  private cleanText(value: string): string {
+    if (!value) return "";
+    const withBreaks = value
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n\n");
+    return load(`<div id="__litnet_text">${withBreaks}</div>`)
+      .text()
+      .replace(/\u00a0/g, " ")
+      .replace(/[ \t]+/g, " ")
+      .replace(/ *\n */g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+  }
+
+  private restoreParagraphs(text: string): string {
+    if (!text || text.includes("\n")) return text;
+    return text
+      .replace(/([.!?…»"])\s+(?=[-—]\s)/g, "$1\n\n")
+      .replace(/\s*(\*\s*\*\s*\*)\s*/g, "\n\n$1\n\n")
+      .trim();
+  }
+
+  private buildSummary(book: LdBook, $: ReturnType<typeof load>): string {
+    const fromJsonLd = this.cleanText(book.description || "");
+    const fromPage = this.cleanText($(".book_annotation").first().html() || "");
+    const source =
+      fromJsonLd.length >= fromPage.length * 0.9 ? fromJsonLd : fromPage;
+    return this.restoreParagraphs(source);
   }
 
   private parseBookList(html: string): Plugin.NovelItem[] {
@@ -154,17 +183,11 @@ class Litnet implements Plugin.PluginBase {
         $(".book-cover img").first().attr("src") ||
         book.image ||
         $('meta[property="og:image"]').attr("content"),
-      summary: (book.description || $(".book_annotation").text() || "")
-        .replace(/<br\s*\/?>/gi, "\n")
-        .replace(/<[^>]+>/g, "")
-        .trim(),
+      summary: this.buildSummary(book, $),
       status: this.getStatus(infoText),
     };
 
     if (genres.length) novel.genres = genres.join(", ");
-    if (book.aggregateRating?.ratingValue) {
-      novel.rating = Number(book.aggregateRating.ratingValue);
-    }
 
     const chapters: Plugin.ChapterItem[] = [];
     $(".bp-chapterList a.collection-item").each((_, element) => {
