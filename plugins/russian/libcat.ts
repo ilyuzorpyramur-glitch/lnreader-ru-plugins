@@ -16,7 +16,7 @@ class LibCat implements Plugin.PluginBase {
   name = "ЛибКат";
   icon = "src/ru/libcat/icon.png";
   site = "https://libcat.ru";
-  version = "1.0.1";
+  version = "1.0.2";
 
   private headers = {
     "User-Agent":
@@ -156,7 +156,12 @@ class LibCat implements Plugin.PluginBase {
       .toArray()
       .map((node) => $(node).text().trim())
       .filter(Boolean);
-    const genres = breadcrumbs.slice(1, -1).join(", ");
+    const genres = breadcrumbs
+      .filter(
+        (name) =>
+          !/^(LibCat|Главная|Книги|Каталог)$/i.test(name) && name !== title,
+      )
+      .join(", ");
 
     const coverHref = $('a[itemprop="image"]').first().attr("href");
     const cover = coverHref
