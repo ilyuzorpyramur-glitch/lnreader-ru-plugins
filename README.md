@@ -44,7 +44,7 @@ https://raw.githubusercontent.com/ilyuzorpyramur-glitch/lnreader-ru-plugins/plug
 
 ## 📖 Каталог плагинов
 
-**Платформы:** Author.Today · Ranobelib · Ficbook · Ranobes · Jaomix · Ranobehub · BookRiver · NeoBook · TopLiba · Zelluloza · Renovels · NovelTL · Литнет
+**Платформы:** Author.Today · Ranobelib · Ficbook · Ranobes · Jaomix · Ranobehub · BookRiver · NeoBook · TopLiba · Zelluloza · Renovels · NovelTL · Литнет · ЛибКат
 
 **Мультисорсовые:** Rulate (Bllate / Erolate) · ifreedom (Bookhamster / СвободныйМирРанобэ) · MTLNovel · NovelCool
 
