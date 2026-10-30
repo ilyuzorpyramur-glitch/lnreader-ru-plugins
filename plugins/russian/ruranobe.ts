@@ -12,7 +12,7 @@ const statusKey: Record<string, string> = {
   'unknown': NovelStatus.Unknown,
 };
 
-class TL implements Plugin.PluginBase {
+class RuRanobe implements Plugin.PluginBase {
   id = 'ruranobe';
   name = 'RuRanobe';
   site = 'https://ruranobe.ru';
@@ -848,7 +848,7 @@ class TL implements Plugin.PluginBase {
   } satisfies Filters;
 }
 
-export default new TL();
+export default new RuRanobe();
 
 type response = {
   data: Data;
